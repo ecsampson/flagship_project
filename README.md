@@ -18,14 +18,14 @@ This project aims to gather weather data to analyze patterns and anomalies in re
 ## Project Scope
 
 ### Project Structure
---- src/ # Source Code
---- tests/ # Unit Tests
---- docs/ # Documentation
---- config/ # Configuration files
---- assets/ # Images, media, etc.
---- README.md
---- LICENSE
---- .gitignore
+- src/ # Source Code
+- test/ # Unit Tests
+- docs/ # Documentation
+- config/ # Configuration
+- assets/ # Images, media, etc
+- README.md
+- LICENSE
+- .gitignore
 
 ### Essential Features
 - NOAA API data extraction
