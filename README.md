@@ -17,6 +17,16 @@ This project aims to gather weather data to analyze patterns and anomalies in re
 
 ## Project Scope
 
+### Project Structure
+├── src/           # Source code
+├── tests/         # Unit tests
+├── docs/          # Documentation
+├── config/        # Configuration files
+├── assets/        # Images, media, etc.
+├── README.md
+├── LICENSE
+└── .gitignore
+
 ### Essential Features
 - NOAA API data extraction
 - Data transformation and cleaning using Python
