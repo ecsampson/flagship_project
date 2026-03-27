@@ -1,3 +1,4 @@
+import os
 import yaml
 from pathlib import Path
 from noaa_client import fetch_noaa_data, group_noaa_data, parse_noaa_data, detect_extreme_weather
@@ -13,6 +14,7 @@ def main():
         settings = yaml.safe_load(f)
 
     noaa = settings["noaa"]
+    api_key = os.environ.get("NOAA_API_KEY") or noaa["api_key"]
     params = {
         "datasetid": noaa["default_dataset"],
         "locationid": noaa["default_location"],
@@ -20,7 +22,7 @@ def main():
     }
 
     response = fetch_noaa_data(
-        api_key=noaa["api_key"],
+        api_key=api_key,
         base_url=noaa["base_url"],
         params=params
     )
@@ -28,11 +30,12 @@ def main():
     if response.status_code == 200:
         parsed_data = parse_noaa_data(response.json())
         grouped_data = group_noaa_data(parsed_data)
-        store_noaa_data(parsed_data, DATA_PATH)
         extreme_events = detect_extreme_weather(grouped_data, settings["extreme_weather"]["thresholds"])
+        store_noaa_data(parsed_data, DATA_PATH)
         store_extreme_weather(extreme_events, EXTREME_PATH)
     else:
-        print(response.text)
+        print(f"API request failed: {response.status_code} - {response.text}")
+        return
 
 
 if __name__ == "__main__":
