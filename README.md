@@ -42,3 +42,18 @@ This project aims to gather weather data to analyze patterns and anomalies in re
 - [ChatGPT](https://chat.openai.com)
 - [DataTalksClub YouTube Channel](https://www.youtube.com/@DataTalksClub)
 - [NOAA Web Services API v2](https://www.ncdc.noaa.gov/cdo-web/webservices/v2)
+
+
+
+### Timeline:
+
+- Created new functions group_noaa_data, store_noaa_data, parse_noaa_data and fetch_noaa_data inside of noaa_client.py
+- These functions fetch the data from the NOAA API, then parse and group the data by datatype. Then stores the data inside of a csv found in /data/noaa_weather_data.csv
+- Currently all functions are working as intended
+
+
+
+### Next Day Plans:
+- Either increase the amount of data being pulled from the NOAA
+- Or start classifying what is extreme weather and compiling the extreme weather data into a new csv file
+- Creating unit tests inside of the /tests folder in order to throughly test my process

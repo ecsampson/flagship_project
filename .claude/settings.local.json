@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.ncei.noaa.gov)",
+      "WebFetch(domain:www.weather.gov)"
+    ]
+  }
+}

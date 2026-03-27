@@ -1,7 +1,27 @@
 1. How to get NOAA API?
+    - Grabbed NOAA API key and set it to my email
+    - Currently only stored in email and in project
 
 2. Will I be storing temp data first locally or get a cloud-server?
+    ~Currently storing temporarily in a csv (don't plan for this to be long term solution)
 
 3. Inital steps on testing if the data cleaning is working properly?
 
 4. Amount willing to spend on this project?
+
+5. How much data should I fetch each time?
+    ~ NOAA doesn't like you grabbing to much each time so limits max amount
+
+6. How to get/parse through the data only looking for verified tornado storms as well as the weather pre-tornado?
+    - Unable to search for a "Wind speed" data type, instead using precipitation, Max temp, min tem, snow etc. 
+
+7. How to store years worth of data to analysis trends over the years?
+        - Through cloud server
+        
+8. How to create a README that takes users to where they want in the project?
+
+9. How to create a index.md inside of documents to bring users to what document they wish to view?
+
+10. What is defined as extreme weather by professionals?
+
+11. How to create unit tests properly that will effectively test my code?
