@@ -9,7 +9,7 @@ from storage import store_noaa_data, store_extreme_weather, store_weather_signal
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
 DATA_PATH = Path(__file__).parent.parent / "data" / "noaa_weather_data.csv"
 EXTREME_PATH = Path(__file__).parent.parent / "data" / "noaa_extreme_weather.csv"
-SIGNALS_PATH = Path(__file__).parent.parent / "data" / "noaa_weather_signals.csv"
+SIGNALS_PATH = Path(__file__).parent.parent / "data" / "feat_weather_signals.csv"
 
 
 def main():
