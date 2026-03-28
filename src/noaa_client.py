@@ -25,12 +25,17 @@ def fetch_noaa_data(api_key, base_url, params):
 def parse_noaa_data(data):
     """Parse raw NOAA API response into a list of normalized date/type/value dicts."""
     parsed = []
-    for item in data.get("results", []):
-        parsed.append({
-            "date": item["date"][:10],
-            "type": item["datatype"],
-            "value": item["value"] / 10 if item.get("value") is not None else None
-        })
+    skip_keys = {"DATE", "STATION"}
+    for row in data:
+        date = row["DATE"][:10]
+        for key, raw in row.items():
+            if key in skip_keys:
+                continue
+            try:
+                value = int(raw) / 10
+            except (ValueError, TypeError):
+                value = None
+            parsed.append({"date": date, "type": key, "value": value})
     return parsed
 
 
