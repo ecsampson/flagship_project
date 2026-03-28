@@ -1,0 +1,34 @@
+noaa:
+  api_key: "YOUR_NOAA_API_KEY"
+  base_url: "https://www.ncdc.noaa.gov/cdo-web/api/v2/data"
+  default_dataset: "GHCND"
+  default_location: "FIPS:27"
+  query:
+    startdate: "2020-01-01"
+    enddate: "2020-01-05"
+    datatypeid:
+      - TMAX
+      - TMIN
+      - PRCP
+      - SNOW
+      - SNWD
+    limit: 1000
+
+aws:
+  # Credentials are loaded exclusively from environment variables - never store them here
+  # Required: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+  region: "us-east-1"
+  bucket: "your-s3-bucket-name"
+
+extreme_weather:
+  thresholds:
+    TMAX:
+      above: 35.0 # Celsius - extreme heat
+    TMIN:
+      below: -20.0 # Celsius - extreme cold
+    PRCP:
+      above: 25.0 # mm - heavy precipitation
+    SNOW:
+      above: 25.0 # mm - heavy snowfall
+    SNWD:
+      above: 50.0 # mm - deep snow depth

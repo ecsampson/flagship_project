@@ -1,0 +1,32 @@
+noaa:
+  api_key: "oelblAGXMayyKwNjNWlkNvVkIkjfBPMu"
+  base_url: "https://www.ncei.noaa.gov/access/services/data/v1"
+  default_dataset: "GHCND"
+  default_location: "FIPS:27"
+  
+  query:
+    dataset: "daily-summaries"
+    stations: "USW00014922"
+    dataTypes: "TMAX,TMIN,PRCP,SNOW,SNWD"
+    startDate: "2020-01-01"
+    endDate: "2020-12-31"
+    format: "json"
+
+aws:
+  # Credentials are loaded exclusively from environment variables - never store them here
+  # Required: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+  region: "us-east-1"
+  bucket: "flagship-project-weather-data"
+
+extreme_weather:
+  thresholds:
+    TMAX:
+      above: 35.0 # Celsius - extreme heat
+    TMIN:
+      below: -20.0 # Celsius - extreme cold
+    PRCP:
+      above: 25.0 # mm - heavy precipitation
+    SNOW:
+      above: 25.0 # mm - heavy snowfall
+    SNWD:
+      above: 50.0 # mm - deep snow depth
