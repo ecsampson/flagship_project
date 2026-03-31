@@ -27,8 +27,8 @@ def upload_to_s3(file_path, data_type, bucket_name):
         data_type: "raw" for all weather records, "extreme" for extreme events.
         bucket_name: Target S3 bucket name.
     """
-    if data_type not in ("raw", "extreme", "features"):
-        raise ValueError(f"data_type must be 'raw', 'extreme', or 'features', got '{data_type}'")
+    if data_type not in ("raw", "extreme", "features", "dimensions", "facts"):
+        raise ValueError(f"data_type must be 'raw', 'extreme', 'features', 'dimensions', or 'facts', got '{data_type}'")
 
     s3_client = boto3.client("s3")
 

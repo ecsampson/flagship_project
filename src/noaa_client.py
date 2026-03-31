@@ -1,4 +1,35 @@
+import time
 import requests
+
+
+def fetch_all_noaa_data(api_key, base_url, params):
+    """Fetch all records from the NOAA API using offset-based pagination.
+
+    Repeatedly calls the endpoint, advancing the offset by 1000 each time,
+    until a page returns fewer than 1000 records (signalling the final page).
+    Sleeps 0.5 seconds between requests to stay within NOAA rate limits.
+
+    Returns a flat list of all raw record dicts across all pages.
+    """
+    all_records = []
+    offset = 0
+    page_size = 9999
+
+    while True:
+        paged_params = {**params, "offset": offset, "limit": page_size}
+        response = fetch_noaa_data(api_key, base_url, paged_params)
+        page = response.json()
+
+        all_records.extend(page)
+        print(f"Fetched {len(all_records)} records so far (offset={offset})...")
+
+        if len(page) < page_size:
+            break
+
+        offset += page_size
+        time.sleep(0.5)
+
+    return all_records
 
 
 def fetch_noaa_data(api_key, base_url, params):
@@ -8,7 +39,7 @@ def fetch_noaa_data(api_key, base_url, params):
             base_url,
             headers={"token": api_key},
             params=params,
-            timeout=10
+            timeout=30
         )
         response.raise_for_status()
         return response
