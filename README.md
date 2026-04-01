@@ -49,11 +49,14 @@ This project aims to gather weather data to analyze patterns and anomalies in re
 
 - Created new functions group_noaa_data, store_noaa_data, parse_noaa_data and fetch_noaa_data inside of noaa_client.py
 - These functions fetch the data from the NOAA API, then parse and group the data by datatype. Then stores the data inside of a csv found in /data/noaa_weather_data.csv
-- Currently all functions are working as intended
+- Increased the amount of data being pulled to a decade worth of data from only a singular station instead of the entire state.
+- Added dimension and fact tables.
+- Added pagination in order to process the large amount of data in the data ingestion.
 
 
 
 ### Next Day Plans:
-- Either increase the amount of data being pulled from the NOAA
-- Or start classifying what is extreme weather and compiling the extreme weather data into a new csv file
+- Do station-specifc file names to sort the data
+    - Future thinking for scaling to multiple stations
+- Adding Parquet conversion
 - Creating unit tests inside of the /tests folder in order to throughly test my process
