@@ -52,11 +52,14 @@ This project aims to gather weather data to analyze patterns and anomalies in re
 - Increased the amount of data being pulled to a decade worth of data from only a singular station instead of the entire state.
 - Added dimension and fact tables.
 - Added pagination in order to process the large amount of data in the data ingestion.
+- Created unit tests and integration tests to test each function throughly and to test the handoff between the stages in the pipeline.
+- Created station-specifc file names to sort the data
+    - For scaling to multiple stations
+- Added Parquet conversion
+- Redefined extreme weather threshold to be the thresholds that NOAA has determined for the region I am pulling data from
 
 
 
 ### Next Day Plans:
-- Do station-specifc file names to sort the data
-    - Future thinking for scaling to multiple stations
-- Adding Parquet conversion
-- Creating unit tests inside of the /tests folder in order to throughly test my process
+- AWS Glue or Lambda
+- Redefine extreme thresholds to better line up with NOAA standards
