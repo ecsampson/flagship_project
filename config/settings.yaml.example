@@ -4,6 +4,7 @@ noaa:
   default_dataset: "GHCND"
   default_location: "FIPS:27"
   query:
+    stations: "USW00014922"  # Station ID — used as a prefix in output filenames
     startdate: "2020-01-01"
     enddate: "2020-01-05"
     datatypeid:

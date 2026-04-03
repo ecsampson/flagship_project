@@ -243,3 +243,180 @@ def test_upload_to_s3_uses_correct_bucket(tmp_path):
         _, call_args, _ = mock_s3.upload_file.mock_calls[0]
         bucket = call_args[1]
         assert bucket == "production-bucket"
+
+
+# ---------------------------------------------------------------------------
+# Parquet output — store_noaa_data
+# ---------------------------------------------------------------------------
+
+def test_store_noaa_data_creates_parquet_alongside_csv(tmp_path):
+    """
+    A parquet file must be written next to the CSV on every call.
+    If parquet is missing, downstream consumers expecting columnar format
+    would fail with a FileNotFoundError — with no indication the CSV succeeded.
+    """
+    file_path = tmp_path / "weather.csv"
+    store_noaa_data(WEATHER_RECORDS, file_path)
+
+    assert file_path.with_suffix(".parquet").exists()
+
+
+def test_store_noaa_data_parquet_has_correct_row_count(tmp_path):
+    """
+    The parquet file must contain the same number of rows as the input.
+    A row count mismatch between the CSV and parquet would corrupt any
+    pipeline that reads one format for processing and the other for auditing.
+    """
+    file_path = tmp_path / "weather.csv"
+    store_noaa_data(WEATHER_RECORDS, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert len(df) == len(WEATHER_RECORDS)
+
+
+def test_store_noaa_data_parquet_has_correct_columns(tmp_path):
+    """Parquet output must have the same column schema as the CSV."""
+    file_path = tmp_path / "weather.csv"
+    store_noaa_data(WEATHER_RECORDS, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert set(df.columns) == {"date", "type", "value"}
+
+
+def test_store_noaa_data_parquet_preserves_values(tmp_path):
+    """
+    Values written to parquet must match the input exactly. Parquet uses
+    typed encoding — a float stored as an integer or an object stored as
+    a string would silently corrupt downstream analytics.
+    """
+    file_path = tmp_path / "weather.csv"
+    store_noaa_data(WEATHER_RECORDS, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert df.iloc[0]["value"] == 32.0
+    assert df.iloc[0]["type"] == "TMAX"
+
+
+def test_store_noaa_data_parquet_overwrites_not_appends(tmp_path):
+    """
+    Parquet has no append mode — each write must produce a complete,
+    self-contained snapshot. A second call must not double the row count.
+    The CSV counterpart appends; this asymmetry is intentional and must
+    not be accidentally 'fixed' by adding rows to the parquet file.
+    """
+    file_path = tmp_path / "weather.csv"
+    store_noaa_data(WEATHER_RECORDS, file_path)
+    store_noaa_data(WEATHER_RECORDS, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert len(df) == len(WEATHER_RECORDS)  # not doubled
+
+
+def test_store_noaa_data_csv_still_appends_when_parquet_overwrites(tmp_path):
+    """
+    The parquet overwrite must not affect CSV append behavior. Both behaviors
+    must coexist — breaking CSV append would drop historical records.
+    """
+    file_path = tmp_path / "weather.csv"
+    store_noaa_data(WEATHER_RECORDS, file_path)
+    store_noaa_data(WEATHER_RECORDS, file_path)
+
+    csv_df = pd.read_csv(file_path)
+    parquet_df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert len(csv_df) == len(WEATHER_RECORDS) * 2  # appended
+    assert len(parquet_df) == len(WEATHER_RECORDS)   # overwritten
+
+
+# ---------------------------------------------------------------------------
+# Parquet output — store_extreme_weather
+# ---------------------------------------------------------------------------
+
+def test_store_extreme_weather_creates_parquet_alongside_csv(tmp_path):
+    """Parquet file must exist after a call to store_extreme_weather."""
+    file_path = tmp_path / "extreme.csv"
+    store_extreme_weather(EXTREME_RECORDS, file_path)
+
+    assert file_path.with_suffix(".parquet").exists()
+
+
+def test_store_extreme_weather_parquet_has_all_columns(tmp_path):
+    """
+    The threshold and condition columns must survive the parquet write.
+    They are the reason extreme events have a separate output from raw weather —
+    losing them in parquet format would make the parquet file useless for alerting.
+    """
+    file_path = tmp_path / "extreme.csv"
+    store_extreme_weather(EXTREME_RECORDS, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert set(df.columns) == {"date", "type", "value", "threshold", "condition"}
+
+
+def test_store_extreme_weather_parquet_overwrites_not_appends(tmp_path):
+    """Parquet must overwrite on the second call, same as store_noaa_data."""
+    file_path = tmp_path / "extreme.csv"
+    store_extreme_weather(EXTREME_RECORDS, file_path)
+    store_extreme_weather(EXTREME_RECORDS, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert len(df) == len(EXTREME_RECORDS)  # not doubled
+
+
+# ---------------------------------------------------------------------------
+# Parquet output — store_weather_signals
+# ---------------------------------------------------------------------------
+
+def test_store_weather_signals_creates_parquet_alongside_csv(tmp_path):
+    """Parquet file must exist after a call to store_weather_signals."""
+    file_path = tmp_path / "signals.csv"
+    signals_df = pd.DataFrame([{"date": "2024-01-15", "tmax_7d_avg": 28.5}])
+    store_weather_signals(signals_df, file_path)
+
+    assert file_path.with_suffix(".parquet").exists()
+
+
+def test_store_weather_signals_parquet_has_correct_row_count(tmp_path):
+    """Parquet row count must match the input DataFrame."""
+    file_path = tmp_path / "signals.csv"
+    signals_df = pd.DataFrame([
+        {"date": "2024-01-15", "tmax_7d_avg": 28.5},
+        {"date": "2024-01-16", "tmax_7d_avg": 29.0},
+    ])
+    store_weather_signals(signals_df, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert len(df) == 2
+
+
+def test_store_weather_signals_parquet_overwrites_not_appends(tmp_path):
+    """Parquet must overwrite on the second call."""
+    file_path = tmp_path / "signals.csv"
+    signals_df = pd.DataFrame([{"date": "2024-01-15", "tmax_7d_avg": 28.5}])
+    store_weather_signals(signals_df, file_path)
+    store_weather_signals(signals_df, file_path)
+
+    df = pd.read_parquet(file_path.with_suffix(".parquet"))
+    assert len(df) == 1  # not doubled
+
+
+# ---------------------------------------------------------------------------
+# Parquet upload to S3
+# ---------------------------------------------------------------------------
+
+def test_upload_to_s3_constructs_correct_s3_key_for_parquet(tmp_path):
+    """
+    The S3 key for a parquet file must be '{data_type}/{filename}.parquet'.
+    upload_to_s3 derives the key from file_path.name — it must not strip or
+    change the extension, or the parquet file would land at the wrong S3 path.
+    """
+    parquet_file = tmp_path / "USC00213567_weather_data.parquet"
+    pd.DataFrame([{"col": "val"}]).to_parquet(parquet_file, index=False)
+
+    with patch("src.storage.boto3.client") as mock_boto3_client:
+        mock_s3 = MagicMock()
+        mock_boto3_client.return_value = mock_s3
+
+        upload_to_s3(parquet_file, "raw", "my-bucket")
+
+        _, call_args, _ = mock_s3.upload_file.mock_calls[0]
+        assert call_args[2] == "raw/USC00213567_weather_data.parquet"

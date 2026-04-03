@@ -7,14 +7,8 @@ from storage import store_noaa_data, store_extreme_weather, store_weather_signal
 from models import build_dim_date, build_dim_location, build_fact_weather_observations
 
 
-# Paths resolved relative to this file so the script works from any working directory
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
-DATA_PATH = Path(__file__).parent.parent / "data" / "noaa_weather_data.csv"
-EXTREME_PATH = Path(__file__).parent.parent / "data" / "noaa_extreme_weather.csv"
-SIGNALS_PATH = Path(__file__).parent.parent / "data" / "feat_weather_signals.csv"
-DIM_DATE_PATH = Path(__file__).parent.parent / "data" / "dim_date.csv"
-DIM_LOCATION_PATH = Path(__file__).parent.parent / "data" / "dim_location.csv"
-FACT_WEATHER_OBSERVATIONS_PATH = Path(__file__).parent.parent / "data" / "fact_weather_observations.csv"
+DATA_DIR = Path(__file__).parent.parent / "data"
 
 def main():
     """Run the NOAA ETL pipeline: fetch, parse, detect extreme weather, and store results."""
@@ -27,6 +21,18 @@ def main():
     # Environment variable takes precedence so the config-file key is never required in production
     api_key = os.environ.get("NOAA_API_KEY") or noaa["api_key"]
     params = {**noaa["query"]}
+
+    station_id = noaa["query"]["stations"]
+    if isinstance(station_id, list):
+        station_id = station_id[0]
+
+    # Paths include the station ID so outputs from different stations don't collide
+    DATA_PATH = DATA_DIR / f"{station_id}_weather_data.csv"
+    EXTREME_PATH = DATA_DIR / f"{station_id}_extreme_weather.csv"
+    SIGNALS_PATH = DATA_DIR / f"{station_id}_weather_signals.csv"
+    DIM_DATE_PATH = DATA_DIR / f"{station_id}_dim_date.csv"
+    DIM_LOCATION_PATH = DATA_DIR / f"{station_id}_dim_location.csv"
+    FACT_WEATHER_OBSERVATIONS_PATH = DATA_DIR / f"{station_id}_fact_weather_observations.csv"
 
     raw_records = fetch_all_noaa_data(
         api_key=api_key,
@@ -48,12 +54,16 @@ def main():
         store_noaa_data(parsed_data, DATA_PATH)
         store_extreme_weather(extreme_events, EXTREME_PATH)
         store_weather_signals(weather_signals, SIGNALS_PATH)
-        upload_to_s3(DIM_DATE_PATH, "dimensions", aws_bucket)
-        upload_to_s3(DIM_LOCATION_PATH, "dimensions", aws_bucket)
-        upload_to_s3(FACT_WEATHER_OBSERVATIONS_PATH, "facts", aws_bucket)
-        upload_to_s3(DATA_PATH, "raw", aws_bucket)
-        upload_to_s3(EXTREME_PATH, "extreme", aws_bucket)
-        upload_to_s3(SIGNALS_PATH, "features", aws_bucket)
+        for path, data_type in [
+            (DIM_DATE_PATH, "dimensions"),
+            (DIM_LOCATION_PATH, "dimensions"),
+            (FACT_WEATHER_OBSERVATIONS_PATH, "facts"),
+            (DATA_PATH, "raw"),
+            (EXTREME_PATH, "extreme"),
+            (SIGNALS_PATH, "features"),
+        ]:
+            upload_to_s3(path, data_type, aws_bucket)
+            upload_to_s3(path.with_suffix('.parquet'), data_type, aws_bucket)
     else:
         print("No records returned from NOAA API.")
         return

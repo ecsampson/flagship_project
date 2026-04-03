@@ -404,6 +404,89 @@ class TestStorageRoundTrip:
         df = pd.read_csv(file_path)
         assert len(df) == len(parsed) * 2
 
+    def test_parsed_records_survive_parquet_round_trip(self, tmp_path):
+        """
+        Parse → write → read back via Parquet. Row count and columns must match.
+        The unit tests use synthetic dicts; this uses real parse output, which
+        includes date strings that pyarrow may infer as object or string types.
+        A type inference failure would raise on write, not silently corrupt data.
+        """
+        parsed = parse_noaa_data(RAW_API_RESPONSE)
+        file_path = tmp_path / "weather.csv"
+        store_noaa_data(parsed, file_path)
+
+        df = pd.read_parquet(file_path.with_suffix(".parquet"))
+        assert len(df) == len(parsed)
+        assert set(df.columns) == {"date", "type", "value"}
+
+    def test_extreme_events_survive_parquet_round_trip(self, tmp_path):
+        """
+        Detect → write → read back via Parquet. The threshold (float) and
+        condition (string) columns must survive. Mixed-type columns in a real
+        pipeline output are more likely to trigger pyarrow encoding errors than
+        the single-type columns used in unit tests.
+        """
+        parsed = parse_noaa_data(RAW_API_RESPONSE)
+        grouped = group_noaa_data(parsed)
+        events = detect_extreme_weather(grouped, SETTINGS["extreme_weather"]["thresholds"])
+        file_path = tmp_path / "extreme.csv"
+        store_extreme_weather(events, file_path)
+
+        df = pd.read_parquet(file_path.with_suffix(".parquet"))
+        assert len(df) == len(events)
+        assert {"threshold", "condition"}.issubset(df.columns)
+
+    def test_star_schema_tables_survive_parquet_round_trip(self, tmp_path):
+        """
+        Build all three star schema tables and verify each survives a Parquet
+        round-trip. This catches pyarrow type-mapping failures specific to real
+        pipeline outputs:
+          - dim_date has datetime64[ns] and bool (is_weekend)
+          - fact has bool (is_extreme) and integer foreign keys
+          - dim_location has object columns that must not be silently truncated
+        These types are absent from the synthetic data used in unit tests.
+        """
+        parsed = parse_noaa_data(RAW_API_RESPONSE)
+        dim_date = build_dim_date(parsed)
+        dim_location = build_dim_location(SETTINGS)
+        fact = build_fact_weather_observations(parsed, dim_date, dim_location, SETTINGS)
+
+        dim_date_path = tmp_path / "dim_date.csv"
+        dim_location_path = tmp_path / "dim_location.csv"
+        fact_path = tmp_path / "fact.csv"
+
+        store_noaa_data(dim_date, dim_date_path)
+        store_noaa_data(dim_location, dim_location_path)
+        store_noaa_data(fact, fact_path)
+
+        assert len(pd.read_parquet(dim_date_path.with_suffix(".parquet"))) == len(dim_date)
+        assert len(pd.read_parquet(dim_location_path.with_suffix(".parquet"))) == len(dim_location)
+        assert len(pd.read_parquet(fact_path.with_suffix(".parquet"))) == len(fact)
+
+    def test_bool_columns_survive_parquet_round_trip(self, tmp_path):
+        """
+        dim_date.is_weekend and fact.is_extreme are bool columns. pyarrow maps
+        these to Parquet BOOLEAN — verify the values are preserved as Python
+        booleans after reading back, not coerced to 0/1 integers or strings.
+        A type change here would silently break any downstream filter on these
+        columns (e.g. WHERE is_weekend = True).
+        """
+        parsed = parse_noaa_data(RAW_API_RESPONSE)
+        dim_date = build_dim_date(parsed)
+        dim_location = build_dim_location(SETTINGS)
+        fact = build_fact_weather_observations(parsed, dim_date, dim_location, SETTINGS)
+
+        dim_date_path = tmp_path / "dim_date.csv"
+        fact_path = tmp_path / "fact.csv"
+        store_noaa_data(dim_date, dim_date_path)
+        store_noaa_data(fact, fact_path)
+
+        dim_date_back = pd.read_parquet(dim_date_path.with_suffix(".parquet"))
+        fact_back = pd.read_parquet(fact_path.with_suffix(".parquet"))
+
+        assert dim_date_back["is_weekend"].dtype == bool
+        assert fact_back["is_extreme"].dtype == bool
+
 
 # ---------------------------------------------------------------------------
 # Full pipeline end-to-end (fetch mocked, S3 mocked)
@@ -448,19 +531,26 @@ class TestFullPipeline:
 
     def test_all_output_files_are_created(self, tmp_path):
         """
-        A full run must produce all six output files. A missing file means a
-        stage silently failed or was skipped — downstream jobs reading from
-        that path would fail with a FileNotFoundError rather than a clear error.
+        A full run must produce all six outputs in both CSV and Parquet formats
+        (12 files total). A missing file means a stage silently failed or the
+        parquet write was skipped — downstream jobs reading from that path would
+        fail with a FileNotFoundError rather than a clear pipeline error.
         """
         self._run_pipeline(RAW_API_RESPONSE, tmp_path)
 
         expected_files = [
             "noaa_weather_data.csv",
+            "noaa_weather_data.parquet",
             "noaa_extreme_weather.csv",
+            "noaa_extreme_weather.parquet",
             "feat_weather_signals.csv",
+            "feat_weather_signals.parquet",
             "dim_date.csv",
+            "dim_date.parquet",
             "dim_location.csv",
+            "dim_location.parquet",
             "fact_weather_observations.csv",
+            "fact_weather_observations.parquet",
         ]
         for filename in expected_files:
             assert (tmp_path / filename).exists(), f"Missing output file: {filename}"

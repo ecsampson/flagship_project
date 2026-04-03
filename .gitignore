@@ -207,3 +207,4 @@ marimo/_lsp/
 __marimo__/
 config/settings.yaml
 data/*.csv
+data/*.parquet
