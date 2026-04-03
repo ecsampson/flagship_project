@@ -46,7 +46,7 @@ All files land in `data/` locally and are mirrored to S3 under the corresponding
 The central fact table. One row per (date, datatype) observation.
 
 | Column | Type | Description |
-|---|---|---|
+|--------|------|--------------|
 | observation_id | int | Primary key |
 | date_id | int | Foreign key → dim_date |
 | location_id | int | Foreign key → dim_location |
@@ -58,7 +58,7 @@ The central fact table. One row per (date, datatype) observation.
 Date dimension for joining and calendar-based analysis.
 
 | Column | Type | Description |
-|---|---|---|
+|--------|------|-------------|
 | date_id | int | Primary key |
 | date | datetime | Calendar date |
 | year / month / day | int | Calendar components |
@@ -69,7 +69,7 @@ Date dimension for joining and calendar-based analysis.
 Single-row location dimension. Extend `_LOCATION_LOOKUP` in `models.py` to support additional stations.
 
 | Column | Type | Description |
-|---|---|---|
+|--------|------|-------------|
 | location_id | int | Primary key |
 | fips_code | str | FIPS state or station code |
 | state_name / state_abbr | str | Human-readable state |
@@ -79,7 +79,7 @@ Single-row location dimension. Extend `_LOCATION_LOOKUP` in `models.py` to suppo
 Feature-engineered table for trend analysis and ML. One row per (date, datatype).
 
 | Column | Type | Description |
-|---|---|---|
+|--------|------|-------------|
 | date | datetime | Observation date |
 | datatype | str | Measurement type |
 | value | float | Raw measurement value |
@@ -94,7 +94,7 @@ Feature-engineered table for trend analysis and ML. One row per (date, datatype)
 Flat normalized records for every observation. Inputs to all downstream tables.
 
 | Column | Type | Description |
-|---|---|---|
+|--------|------|-------------|
 | date | str | YYYY-MM-DD |
 | type | str | Datatype (TMAX, TMIN, PRCP, etc.) |
 | value | float | Measurement in standard units |
@@ -103,7 +103,7 @@ Flat normalized records for every observation. Inputs to all downstream tables.
 Subset of `weather_data` — only records that breach a threshold. Enriched with threshold metadata for alerting and reporting.
 
 | Column | Type | Description |
-|---|---|---|
+|--------|------|-------------|
 | date / type / value | — | Same as weather_data |
 | threshold | float | The threshold value that was breached |
 | condition | str | "above" or "below" |
@@ -116,7 +116,7 @@ Thresholds are aligned to NWS Twin Cities watch/warning/advisory criteria for st
 Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_criteria)
 
 | Datatype | Description | Threshold |
-|---|---|---|
+|----------|-------------|-----------|
 | TMAX | Maximum temperature | > 37.8°C (100°F) |
 | TMIN | Minimum temperature | < −37.2°C (−35°F) |
 | PRCP | Precipitation | > 25.0 mm (1.0 in) |
@@ -130,7 +130,7 @@ Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_crite
 ## Tech Stack
 
 | Tool | Role |
-|---|---|
+|------|------|
 | Python 3.14 | Core language |
 | pandas | Data transformation and feature engineering |
 | pyarrow | Parquet serialization |
