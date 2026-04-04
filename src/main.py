@@ -7,8 +7,10 @@ from storage import store_noaa_data, store_extreme_weather, store_weather_signal
 from models import build_dim_date, build_dim_location, build_fact_weather_observations
 
 
-CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
-DATA_DIR = Path(__file__).parent.parent / "data"
+_IN_LAMBDA = bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+CONFIG_PATH = Path(__file__).parent / "settings.yaml" if _IN_LAMBDA else Path(__file__).parent.parent / "config" / "settings.yaml"
+DATA_DIR = Path("/tmp") if _IN_LAMBDA else Path(__file__).parent.parent / "data"
 
 def main():
     """Run the NOAA ETL pipeline: fetch, parse, detect extreme weather, and store results."""
@@ -67,6 +69,11 @@ def main():
     else:
         print("No records returned from NOAA API.")
         return
+
+
+def lambda_handler(event, context):
+    main()
+    return {"statusCode": 200, "body": "Pipeline completed successfully"}
 
 
 if __name__ == "__main__":
