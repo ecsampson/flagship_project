@@ -208,3 +208,8 @@ __marimo__/
 config/settings.yaml
 data/*.csv
 data/*.parquet
+
+# Lambda build artifacts
+lambda_package/
+lambda_package.zip
+temp_read_parquet.py
