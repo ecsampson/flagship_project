@@ -105,13 +105,22 @@ def main(start_date=None, end_date=None):
 
 def lambda_handler(event, context):
     from datetime import date, timedelta
+    from dateutil.relativedelta import relativedelta
 
     with open(CONFIG_PATH, "r") as f:
         settings = yaml.safe_load(f)
     bucket = settings["aws"]["bucket"]
 
     start_date = get_last_run_date(bucket)
-    end_date = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = date.today() - timedelta(days=1)
+
+    # During backfill, advance by at most 10 years per invocation so the
+    # function never times out on large historical ranges. Once start_date
+    # is within 10 years of today this naturally collapses to yesterday,
+    # giving the normal daily-incremental behaviour from that point on.
+    start_dt = date.fromisoformat(start_date)
+    chunk_end = start_dt + relativedelta(years=10) - timedelta(days=1)
+    end_date = min(chunk_end, yesterday).isoformat()
 
     main(start_date=start_date, end_date=end_date)
 
