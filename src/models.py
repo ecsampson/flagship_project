@@ -89,7 +89,7 @@ def build_fact_weather_observations(parsed_data, dim_date, dim_location, setting
 
     df["observation_id"] = range(len(df))
 
-    return df[["observation_id", "date_id", "location_id", "datatype", "value", "is_extreme"]]
+    return df[["observation_id", "date_id", "date", "location_id", "datatype", "value", "is_extreme"]]
 
 
 def _is_extreme(datatype, value, thresholds):

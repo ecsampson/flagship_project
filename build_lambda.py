@@ -98,16 +98,11 @@ if __name__ == "__main__":
     else:
         print(f"OK: under 250 MB limit.")
 
-    # Verify pyarrow .so files are still present
-    so_files = list((PACKAGE_DIR / "pyarrow").glob("*.so*"))
-    print(f"\npyarrow .so files present: {len(so_files)}")
-    if not so_files:
-        print("ERROR: no .so files found in pyarrow — something went wrong!")
-    else:
-        for f in sorted(so_files)[:5]:
-            print(f"  {f.name}")
-        if len(so_files) > 5:
-            print(f"  ... and {len(so_files) - 5} more")
+    # pandas/pyarrow/numpy are intentionally absent — provided by the Lambda Layer:
+    # arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:22
+    for heavy_pkg in ("pyarrow", "pandas", "numpy"):
+        if (PACKAGE_DIR / heavy_pkg).exists():
+            print(f"WARNING: {heavy_pkg}/ found in package — should be provided by Lambda Layer.")
 
     print(f"\nZipping to {ZIP_PATH} ...")
     count = zip_package(PACKAGE_DIR, ZIP_PATH)
