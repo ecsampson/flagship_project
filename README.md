@@ -1,12 +1,19 @@
 # NOAA Weather ETL Pipeline
 
-A data engineering portfolio project that fetches decade-scale weather data from the NOAA API, detects extreme weather events against NWS-defined thresholds, engineers time-series features, and persists outputs to both local storage and AWS S3 in CSV and Parquet formats. Built as a hands-on demonstration of ETL patterns, star schema modeling, and AI-assisted engineering.
+A data engineering portfolio project that fetches 87+ years of weather data from the NOAA API, detects extreme weather events against NWS-defined thresholds, engineers time-series features, and persists outputs to AWS S3 in CSV and Parquet formats — queryable via AWS Athena. The pipeline runs automatically every day via AWS Lambda and EventBridge with no manual intervention. Built as a hands-on demonstration of ETL patterns, star schema modeling, incremental loading, and AI-assisted engineering.
 
 ---
 
 ## Architecture
 
 ```
+AWS EventBridge (daily schedule)
+     │
+     ▼
+AWS Lambda — lambda_handler()
+     │  reads last_run_date from S3 metadata
+     │  computes 10-year backfill chunk or yesterday (incremental)
+     ▼
 NOAA NCEI API
      │
      ▼
@@ -15,26 +22,128 @@ fetch_all_noaa_data()       — paginated HTTP with rate limiting
      ▼
 parse_noaa_data()           — normalize JSON, divide tenths-of-units values by 10
      │
-     ├──► build_dim_date()           ──► dim_date.csv / .parquet
-     ├──► build_dim_location()       ──► dim_location.csv / .parquet
-     ├──► build_fact_weather_obs()   ──► fact_weather_observations.csv / .parquet
+     ├──► build_dim_date()           ──► dim_date.parquet
+     ├──► build_dim_location()       ──► dim_location.parquet
+     ├──► build_fact_weather_obs()   ──► fact_weather_observations.parquet
      │
      ├──► group_noaa_data()
      │         │
-     │         ├──► detect_extreme_weather()   ──► extreme_weather.csv / .parquet
-     │         └──► generate_weather_signals() ──► weather_signals.csv / .parquet
+     │         ├──► detect_extreme_weather()   ──► extreme_weather.parquet
+     │         └──► generate_weather_signals() ──► weather_signals.parquet
      │
-     └──────────────────────────────────────── weather_data.csv / .parquet
+     └──────────────────────────────────────── weather_data.parquet
                                                         │
                                                         ▼
                                                    AWS S3 Bucket
                                           (raw/ extreme/ features/ dimensions/ facts/)
+                                                        │
+                                                        ▼
+                                               AWS Athena + Glue
+                                          (external tables over S3 Parquet)
 ```
 
 **Key design decisions:**
 - NOAA returns values in tenths of units (e.g. 320 = 32.0°C) — conversion happens once, at parse time, to avoid the risk of double-applying it downstream.
-- All store functions write CSV in append mode and Parquet as a full overwrite. CSV accumulates a historical log; Parquet is always a clean, complete snapshot for analytical queries.
-- Output files are prefixed with the station ID (`USC00213567_weather_data.csv`) so the pipeline can be extended to multiple stations without filename collisions.
+- Parquet files in S3 use an **append + deduplicate** pattern: each run reads the existing S3 object, concatenates new rows, drops duplicates on the natural key (`date + datatype`), and writes back. This means reruns and Lambda retries are safe — no duplicate rows accumulate.
+- CSV files are written locally to `/tmp` each run for debugging and are also uploaded to S3, but they are not the source of truth for analytics — Parquet is.
+- Output files are prefixed with the station ID (`USW00014922_weather_data.parquet`) so the pipeline can be extended to multiple stations without filename collisions.
+
+---
+
+## Data Coverage
+
+| Property | Value |
+|---|---|
+| Station | USW00014922 — Minneapolis St. Paul International Airport |
+| Date range | 1938-01-01 to present (updated daily) |
+| Records | 1,034,944+ observations |
+| Datatypes | TMAX, TMIN, PRCP, SNOW, SNWD, AWND, WSF2 |
+| Location | Minnesota, Midwest US |
+
+Station USW00014922 is one of the longest-running NOAA GHCND stations in the Upper Midwest, with continuous daily observations from 1938. The full 87-year backfill was loaded incrementally in 10-year chunks to stay within Lambda's execution limits.
+
+---
+
+## Automation
+
+The pipeline is fully automated and requires no manual intervention after deployment.
+
+**How it works:**
+
+1. **EventBridge** triggers the Lambda function on a daily schedule.
+2. `lambda_handler` reads `metadata/last_run_date.json` from S3 to determine where the last successful run ended.
+3. It computes the next window: `start = last_run_date`, `end = min(start + 10 years, yesterday)`.
+4. During the initial backfill, each invocation processes one decade of history. Once caught up, the window naturally collapses to a single day and the pipeline enters normal incremental mode.
+5. After a successful run, `last_run_date` is updated in S3 — advancing the cursor only on success. A failed run retries the same window on the next invocation.
+
+**Backfill schedule (first ~9 invocations):**
+
+| Run | Window |
+|-----|--------|
+| 1 | 1938-01-01 → 1947-12-31 |
+| 2 | 1947-12-31 → 1957-12-30 |
+| … | … |
+| 9 | ~2015 → 2025 |
+| 10+ | Yesterday only (incremental) |
+
+---
+
+## AWS Infrastructure
+
+| Service | Role |
+|---------|------|
+| **S3** | Primary data store for all Parquet and CSV outputs, plus pipeline metadata (`last_run_date.json`) |
+| **Lambda** | Runs the full ETL pipeline on a schedule; Python 3.12 runtime |
+| **EventBridge** | Triggers Lambda on a daily cron schedule |
+| **Athena** | Ad-hoc SQL queries over S3 Parquet data |
+| **Glue Data Catalog** | Stores table definitions used by Athena |
+| **IAM** | Per-function execution role with least-privilege S3 and logging permissions |
+
+The Lambda deployment package is kept under 3 MB by omitting pandas, pyarrow, and numpy from the zip — these are provided by the **AWS SDK for pandas** managed layer:
+
+```
+arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:22
+```
+
+---
+
+## Athena
+
+All Parquet outputs are queryable via AWS Athena through manually defined external tables in the Glue Data Catalog. Each table points at an S3 prefix and uses the Parquet SerDe.
+
+**Tables:**
+
+| Table | S3 Prefix | Description |
+|-------|-----------|-------------|
+| `fact_weather_observations` | `facts/parquet/` | One row per (date, datatype) observation |
+| `dim_date` | `dimensions/parquet/` | Date dimension with calendar attributes |
+| `dim_location` | `dimensions/parquet/` | Station/location metadata |
+| `feat_weather_signals` | `features/parquet/` | Feature-engineered rolling stats and extremes |
+
+Example query — hottest days on record:
+
+```sql
+SELECT f.date, f.value AS tmax_celsius
+FROM fact_weather_observations f
+WHERE f.datatype = 'TMAX'
+  AND f.is_extreme = true
+ORDER BY f.value DESC
+LIMIT 20;
+```
+
+Example query — extreme winters by decade:
+
+```sql
+SELECT
+    FLOOR(d.year / 10) * 10 AS decade,
+    COUNT(*) AS extreme_cold_days
+FROM fact_weather_observations f
+JOIN dim_date d ON f.date = d.date
+WHERE f.datatype = 'TMIN'
+  AND f.is_extreme = true
+GROUP BY 1
+ORDER BY 1;
+```
 
 ---
 
@@ -47,8 +156,9 @@ The central fact table. One row per (date, datatype) observation.
 
 | Column | Type | Description |
 |--------|------|--------------|
-| observation_id | int | Primary key |
+| observation_id | int | Surrogate key |
 | date_id | int | Foreign key → dim_date |
+| date | datetime | Observation date (also stored here for dedup and direct querying) |
 | location_id | int | Foreign key → dim_location |
 | datatype | str | Measurement type (TMAX, PRCP, etc.) |
 | value | float | Measurement value in standard units |
@@ -112,7 +222,7 @@ Subset of `weather_data` — only records that breach a threshold. Enriched with
 
 ## Extreme Weather Thresholds
 
-Thresholds are aligned to NWS Twin Cities watch/warning/advisory criteria for station USC00213567 (Minnesota).
+Thresholds are aligned to NWS Twin Cities watch/warning/advisory criteria for station USW00014922 (Minneapolis St. Paul International Airport).
 Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_criteria)
 
 | Datatype | Description | Threshold |
@@ -131,14 +241,14 @@ Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_crite
 
 | Tool | Role |
 |------|------|
-| Python 3.14 | Core language |
+| Python 3.12 | Core language (Lambda runtime) |
 | pandas | Data transformation and feature engineering |
 | pyarrow | Parquet serialization |
-| boto3 | AWS S3 uploads |
+| boto3 | AWS SDK — S3, Lambda, and metadata operations |
 | PyYAML | Configuration loading |
 | requests | NOAA API HTTP client |
 | pytest | Unit and integration testing (142 tests) |
-| AWS S3 | Cloud storage for all CSV and Parquet outputs |
+| AWS SDK for pandas layer | Provides pandas + pyarrow + numpy in Lambda |
 
 ---
 
@@ -165,12 +275,30 @@ export AWS_ACCESS_KEY_ID="..."
 export AWS_SECRET_ACCESS_KEY="..."
 export AWS_DEFAULT_REGION="us-east-1"
 
-# 4. Run the pipeline
+# 4. Run the pipeline locally
 cd src && python main.py
 
 # 5. Run the test suite
 cd .. && python -m pytest tests/
 ```
+
+---
+
+## Project Timeline
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Core ETL pipeline | Complete | Fetch, parse, group, detect, store |
+| Star schema modeling | Complete | fact_weather_observations + 2 dims |
+| Feature engineering | Complete | Rolling averages, severity scores, streaks |
+| Dual CSV + Parquet output | Complete | Both formats written per run |
+| AWS S3 integration | Complete | All outputs mirrored to S3 |
+| AWS Lambda deployment | Complete | Packaged and deployed with managed layer |
+| Backfill + incremental loading | Complete | 10-year chunks → daily incremental |
+| Athena queryability | Complete | External tables over S3 Parquet |
+| EventBridge scheduling | Complete | Daily automated runs |
+| Dashboard / visualization | Planned | — |
+| Multi-station support | Planned | — |
 
 ---
 
@@ -182,14 +310,17 @@ This project was built with Claude (Anthropic) as a pair programming tool throug
 - Boilerplate and structure for functions I had already designed (fetch pagination, CSV append logic)
 - Writing docstrings and test cases once the function behavior was defined
 - Debugging type errors and pandas API changes (the pandas 3.x `groupby().apply()` promotion behavior in `features.py`)
-- Suggesting the columnar storage trade-off between CSV append and Parquet overwrite
+- Lambda packaging — diagnosing the pyarrow `.so` stripping issue and switching to the managed AWS SDK for pandas layer
+- Implementing the `upload_parquet_append_to_s3` append + deduplicate pattern
+- Drafting the backfill chunking logic in `lambda_handler`
 
 **What I decided independently:**
 - The overall pipeline architecture and stage boundaries
 - The choice to use a star schema (fact + dims) rather than a flat output
 - Threshold values — researched and sourced from NWS Twin Cities directly
 - Which datatypes to pull and what constitutes a useful feature for downstream analysis
-- When the AI's suggestion didn't fit (e.g. it suggested deduplication logic that would have changed the pipeline's append-by-design behavior)
+- The backfill + incremental design pattern and the 10-year chunk size
+- Station selection (USW00014922) and confirming the 1938 data start date empirically via API
 
 The test suite (142 tests across unit, integration, and data quality layers) was written collaboratively — I defined what needed to be tested and why; AI helped translate that into pytest code.
 
