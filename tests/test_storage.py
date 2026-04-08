@@ -1,5 +1,9 @@
+import io
+import json
+
 import pandas as pd
 import pytest
+from botocore.exceptions import ClientError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +12,9 @@ from src.storage import (
     store_extreme_weather,
     store_weather_signals,
     upload_to_s3,
+    upload_parquet_append_to_s3,
+    get_last_run_date,
+    save_last_run_date,
 )
 
 
@@ -222,7 +229,7 @@ def test_upload_to_s3_constructs_correct_s3_key(tmp_path):
 
         _, call_args, _ = mock_s3.upload_file.mock_calls[0]
         s3_key = call_args[2]
-        assert s3_key == "raw/noaa_weather_data.csv"
+        assert s3_key == "raw/csv/noaa_weather_data.csv"
 
 
 def test_upload_to_s3_uses_correct_bucket(tmp_path):
@@ -419,4 +426,297 @@ def test_upload_to_s3_constructs_correct_s3_key_for_parquet(tmp_path):
         upload_to_s3(parquet_file, "raw", "my-bucket")
 
         _, call_args, _ = mock_s3.upload_file.mock_calls[0]
-        assert call_args[2] == "raw/USC00213567_weather_data.parquet"
+        assert call_args[2] == "raw/parquet/USC00213567_weather_data.parquet"
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by the S3 append/dedup tests
+# ---------------------------------------------------------------------------
+
+def _make_parquet_bytes(records):
+    """Serialize a list of dicts to an in-memory Parquet buffer."""
+    buf = io.BytesIO()
+    pd.DataFrame(records).to_parquet(buf, index=False, engine="pyarrow")
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _s3_client_mock(existing_parquet_bytes=None, get_error_code=None):
+    """
+    Return a (mock_boto3_client patcher, mock_s3) pair ready for use in a
+    with-statement. Configures get_object to either return parquet bytes,
+    raise a ClientError, or raise NoSuchKey depending on the arguments.
+    """
+    mock_s3 = MagicMock()
+
+    if get_error_code is not None:
+        error_response = {"Error": {"Code": get_error_code, "Message": "test"}}
+        mock_s3.get_object.side_effect = ClientError(error_response, "GetObject")
+    elif existing_parquet_bytes is not None:
+        mock_body = MagicMock()
+        mock_body.read.return_value = existing_parquet_bytes
+        mock_s3.get_object.return_value = {"Body": mock_body}
+
+    return mock_s3
+
+
+# ---------------------------------------------------------------------------
+# upload_parquet_append_to_s3
+# ---------------------------------------------------------------------------
+
+class TestUploadParquetAppendToS3:
+    """
+    upload_parquet_append_to_s3 reads existing Parquet from S3 (if present),
+    concatenates new rows, deduplicates, and writes the result back.
+    These tests verify the three code paths: new key, existing key, and empty input.
+    """
+
+    def test_new_key_writes_input_df_directly(self):
+        """
+        When the S3 key does not exist (NoSuchKey), there is no prior data to
+        merge with. The function must write the new DataFrame as-is. Writing
+        more or fewer rows than the input would corrupt a fresh data lake object.
+        """
+        new_rows = [
+            {"date": "2024-01-01", "type": "TMAX", "value": 32.0},
+            {"date": "2024-01-02", "type": "TMAX", "value": 33.0},
+        ]
+        df = pd.DataFrame(new_rows)
+        mock_s3 = _s3_client_mock(get_error_code="NoSuchKey")
+
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            upload_parquet_append_to_s3(df, "test-bucket", "raw/parquet/weather.parquet", ["date", "type"])
+
+        put_call = mock_s3.put_object.call_args
+        written = pd.read_parquet(io.BytesIO(put_call.kwargs["Body"]))
+        assert len(written) == 2
+
+    def test_existing_key_appends_non_overlapping_rows(self):
+        """
+        When the S3 key exists and the new rows have different natural keys than
+        the existing rows, all rows must appear in the output. A lost row here
+        means historical records are silently dropped on the next pipeline run.
+        """
+        existing_bytes = _make_parquet_bytes([
+            {"date": "2024-01-01", "type": "TMAX", "value": 30.0},
+            {"date": "2024-01-02", "type": "TMAX", "value": 31.0},
+        ])
+        new_df = pd.DataFrame([{"date": "2024-01-03", "type": "TMAX", "value": 32.0}])
+        mock_s3 = _s3_client_mock(existing_parquet_bytes=existing_bytes)
+
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            upload_parquet_append_to_s3(new_df, "test-bucket", "raw/parquet/weather.parquet", ["date", "type"])
+
+        put_call = mock_s3.put_object.call_args
+        written = pd.read_parquet(io.BytesIO(put_call.kwargs["Body"]))
+        assert len(written) == 3
+
+    def test_dedup_new_row_wins_on_same_key(self):
+        """
+        When the same natural key exists in both old and new data, the new row
+        must replace the old one (keep='last'). The old value surviving would mean
+        a correction run never updates the stored value — silently stale data.
+        """
+        existing_bytes = _make_parquet_bytes([
+            {"date": "2024-01-01", "type": "TMAX", "value": 30.0},
+        ])
+        new_df = pd.DataFrame([{"date": "2024-01-01", "type": "TMAX", "value": 99.0}])
+        mock_s3 = _s3_client_mock(existing_parquet_bytes=existing_bytes)
+
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            upload_parquet_append_to_s3(new_df, "test-bucket", "raw/parquet/weather.parquet", ["date", "type"])
+
+        put_call = mock_s3.put_object.call_args
+        written = pd.read_parquet(io.BytesIO(put_call.kwargs["Body"]))
+        assert len(written) == 1
+        assert written.iloc[0]["value"] == 99.0
+
+    def test_dedup_does_not_drop_distinct_keys(self):
+        """
+        Deduplication must only remove rows whose natural keys collide. Rows with
+        different keys in the same batch must all survive. An over-aggressive dedup
+        (e.g. deduping on the wrong column) would silently lose valid records.
+        """
+        existing_bytes = _make_parquet_bytes([
+            {"date": "2024-01-01", "type": "TMAX", "value": 30.0},
+        ])
+        new_df = pd.DataFrame([
+            {"date": "2024-01-01", "type": "TMAX", "value": 30.0},  # duplicate key
+            {"date": "2024-01-01", "type": "TMIN", "value": 10.0},  # different type — keep
+            {"date": "2024-01-02", "type": "TMAX", "value": 31.0},  # different date — keep
+        ])
+        mock_s3 = _s3_client_mock(existing_parquet_bytes=existing_bytes)
+
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            upload_parquet_append_to_s3(new_df, "test-bucket", "raw/parquet/weather.parquet", ["date", "type"])
+
+        put_call = mock_s3.put_object.call_args
+        written = pd.read_parquet(io.BytesIO(put_call.kwargs["Body"]))
+        assert len(written) == 3  # 1 existing deduped + 2 new distinct rows
+
+    def test_empty_dataframe_makes_no_s3_calls(self):
+        """
+        An empty DataFrame must return early without touching S3. Uploading an
+        empty Parquet would overwrite a healthy S3 object with zero rows, silently
+        destroying the historical dataset for that key.
+        """
+        mock_s3 = MagicMock()
+
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            upload_parquet_append_to_s3(
+                pd.DataFrame(), "test-bucket", "raw/parquet/weather.parquet", ["date", "type"]
+            )
+
+        mock_s3.get_object.assert_not_called()
+        mock_s3.put_object.assert_not_called()
+
+    def test_non_nosuchkey_error_reraises(self):
+        """
+        Only NoSuchKey is a recoverable condition (first run with no prior data).
+        Any other S3 error (permissions, network, etc.) must propagate so the
+        pipeline fails loudly rather than silently writing incomplete data.
+        """
+        mock_s3 = _s3_client_mock(get_error_code="AccessDenied")
+        df = pd.DataFrame([{"date": "2024-01-01", "type": "TMAX", "value": 32.0}])
+
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            with pytest.raises(ClientError) as exc_info:
+                upload_parquet_append_to_s3(df, "test-bucket", "raw/parquet/weather.parquet", ["date", "type"])
+
+        assert exc_info.value.response["Error"]["Code"] == "AccessDenied"
+
+    def test_put_object_called_with_correct_bucket_and_key(self):
+        """
+        The write-back must target the exact bucket and S3 key that were passed
+        in. A hardcoded or misrouted key would silently deposit data at the wrong
+        path and leave the intended path stale.
+        """
+        mock_s3 = _s3_client_mock(get_error_code="NoSuchKey")
+        df = pd.DataFrame([{"date": "2024-01-01", "type": "TMAX", "value": 32.0}])
+
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            upload_parquet_append_to_s3(df, "my-bucket", "facts/parquet/fact.parquet", ["date", "type"])
+
+        put_call = mock_s3.put_object.call_args
+        assert put_call.kwargs["Bucket"] == "my-bucket"
+        assert put_call.kwargs["Key"] == "facts/parquet/fact.parquet"
+
+
+# ---------------------------------------------------------------------------
+# get_last_run_date
+# ---------------------------------------------------------------------------
+
+class TestGetLastRunDate:
+    """
+    get_last_run_date reads a JSON cursor from S3 so the Lambda knows where
+    to resume. These tests verify the happy path, the first-run fallback, and
+    that unexpected errors are not silently swallowed.
+    """
+
+    def _make_mock_s3(self, date_str=None, error_code=None):
+        mock_s3 = MagicMock()
+        if error_code:
+            err = {"Error": {"Code": error_code, "Message": "test"}}
+            mock_s3.get_object.side_effect = ClientError(err, "GetObject")
+        else:
+            mock_body = MagicMock()
+            mock_body.read.return_value = json.dumps({"last_run_date": date_str}).encode()
+            mock_s3.get_object.return_value = {"Body": mock_body}
+        return mock_s3
+
+    def test_returns_date_from_s3_json(self):
+        """
+        The primary use case: S3 has a cursor from a prior run. The function
+        must return the stored date string exactly so the next pipeline window
+        starts where the last one ended.
+        """
+        mock_s3 = self._make_mock_s3(date_str="2024-06-15")
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            result = get_last_run_date("test-bucket")
+        assert result == "2024-06-15"
+
+    def test_nosuchkey_returns_full_backfill_start_date(self):
+        """
+        On the very first run no cursor exists in S3. The function must return
+        the earliest available NOAA date ("1938-01-01") so the backfill starts
+        from the beginning. Any other fallback would silently skip early history.
+        """
+        mock_s3 = self._make_mock_s3(error_code="NoSuchKey")
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            result = get_last_run_date("test-bucket")
+        assert result == "1938-01-01"
+
+    def test_other_s3_error_reraises(self):
+        """
+        A permissions error or network failure must not be mistaken for a
+        first-run condition and silently return the fallback date. Doing so
+        would restart a completed backfill from 1938 — destroying the cursor.
+        """
+        mock_s3 = self._make_mock_s3(error_code="AccessDenied")
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            with pytest.raises(ClientError) as exc_info:
+                get_last_run_date("test-bucket")
+        assert exc_info.value.response["Error"]["Code"] == "AccessDenied"
+
+    def test_reads_from_correct_s3_key(self):
+        """
+        The cursor lives at a fixed path. Reading from any other key would
+        return stale or missing data and silently reset the pipeline window.
+        """
+        mock_s3 = self._make_mock_s3(date_str="2024-06-15")
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            get_last_run_date("my-bucket")
+        mock_s3.get_object.assert_called_once_with(
+            Bucket="my-bucket", Key="metadata/last_run_date.json"
+        )
+
+
+# ---------------------------------------------------------------------------
+# save_last_run_date
+# ---------------------------------------------------------------------------
+
+class TestSaveLastRunDate:
+    """
+    save_last_run_date persists the successfully processed end date so the
+    next Lambda invocation can resume from the right window.
+    """
+
+    def _run_save(self, date_str="2024-06-15", bucket="test-bucket"):
+        mock_s3 = MagicMock()
+        with patch("src.storage.boto3.client", return_value=mock_s3):
+            save_last_run_date(date_str, bucket)
+        return mock_s3.put_object.call_args
+
+    def test_writes_correct_json_body(self):
+        """
+        The body must be valid JSON containing last_run_date. A malformed body
+        would crash get_last_run_date on the next invocation, stalling the pipeline.
+        """
+        put_kwargs = self._run_save("2024-06-15").kwargs
+        body = json.loads(put_kwargs["Body"])
+        assert body == {"last_run_date": "2024-06-15"}
+
+    def test_writes_to_correct_s3_key(self):
+        """
+        The cursor must be saved to the same key that get_last_run_date reads from.
+        A key mismatch means get_last_run_date never sees the saved cursor.
+        """
+        put_kwargs = self._run_save().kwargs
+        assert put_kwargs["Key"] == "metadata/last_run_date.json"
+
+    def test_writes_to_correct_bucket(self):
+        """
+        The bucket passed in must be forwarded to S3 unchanged. Writing to a
+        hardcoded bucket name would silently write the cursor to the wrong
+        environment's bucket.
+        """
+        put_kwargs = self._run_save(bucket="production-bucket").kwargs
+        assert put_kwargs["Bucket"] == "production-bucket"
+
+    def test_sets_content_type_json(self):
+        """
+        ContentType must be application/json so AWS and downstream tooling
+        correctly interpret the object without needing to inspect the content.
+        """
+        put_kwargs = self._run_save().kwargs
+        assert put_kwargs["ContentType"] == "application/json"
