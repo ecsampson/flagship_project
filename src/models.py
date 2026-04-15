@@ -26,7 +26,7 @@ def build_dim_date(parsed_data):
     ).sort_values()
 
     df = pd.DataFrame({"date": dates})
-    df["date_id"] = range(len(df))
+    df["date_id"] = pd.to_datetime(df["date"]).dt.strftime("%Y%m%d").astype(int)
     df["year"] = df["date"].dt.year
     df["month"] = df["date"].dt.month
     df["day"] = df["date"].dt.day

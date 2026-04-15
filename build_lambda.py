@@ -8,8 +8,20 @@ import shutil
 import zipfile
 from pathlib import Path
 
+SRC_DIR = Path(__file__).parent / "src"
 PACKAGE_DIR = Path(__file__).parent / "lambda_package"
 ZIP_PATH = Path(__file__).parent / "lambda_package.zip"
+
+SOURCE_FILES = ["main.py", "models.py", "storage.py", "features.py", "noaa_client.py"]
+
+
+def sync_source_files():
+    """Copy src/*.py into lambda_package/, overwriting stale copies."""
+    for name in SOURCE_FILES:
+        src = SRC_DIR / name
+        dst = PACKAGE_DIR / name
+        shutil.copy2(src, dst)
+        print(f"  Copied: src/{name}")
 
 # Directories whose entire subtree should be deleted
 STRIP_DIR_NAMES = {"__pycache__", "tests", "test"}
@@ -83,6 +95,10 @@ def dir_size_mb(path: Path) -> float:
 
 
 if __name__ == "__main__":
+    print("Syncing source files...")
+    sync_source_files()
+    print()
+
     print(f"Package dir: {PACKAGE_DIR}")
     print(f"Size before: {dir_size_mb(PACKAGE_DIR):.1f} MB\n")
 
