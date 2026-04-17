@@ -1,6 +1,6 @@
 # NOAA Weather ETL Pipeline
 
-A data engineering portfolio project that fetches 87+ years of weather data from the NOAA API, detects extreme weather events against NWS-defined thresholds, engineers time-series features, and persists outputs to AWS S3 in CSV and Parquet formats — queryable via AWS Athena. The pipeline runs automatically every day via AWS Lambda and EventBridge with no manual intervention. Built as a hands-on demonstration of ETL patterns, star schema modeling, incremental loading, and AI-assisted engineering.
+A data engineering portfolio project that fetches 87+ years of weather data from the NOAA API, detects extreme weather events against NWS-defined thresholds, engineers time-series features, persists outputs to AWS S3 in Parquet format, and surfaces results in a Power BI dashboard. The pipeline runs automatically every day via AWS Lambda and EventBridge with no manual intervention. Built as a hands-on demonstration of ETL patterns, star schema modeling, incremental loading, and AI-assisted engineering.
 
 ---
 
@@ -45,6 +45,7 @@ parse_noaa_data()           — normalize JSON, divide tenths-of-units values by
 **Key design decisions:**
 - NOAA returns values in tenths of units (e.g. 320 = 32.0°C) — conversion happens once, at parse time, to avoid the risk of double-applying it downstream.
 - Parquet files in S3 use an **append + deduplicate** pattern: each run reads the existing S3 object, concatenates new rows, drops duplicates on the natural key (`date + datatype`), and writes back. This means reruns and Lambda retries are safe — no duplicate rows accumulate.
+- `date_id` in `dim_date` is derived as an integer in `YYYYMMDD` format (e.g. `20240315`) rather than a sequential row index. This makes the surrogate key stable across incremental runs — the same date always maps to the same `date_id`, so foreign keys in the fact table remain valid after any backfill or retry.
 - CSV files are written locally to `/tmp` each run for debugging and are also uploaded to S3, but they are not the source of truth for analytics — Parquet is.
 - Output files are prefixed with the station ID (`USW00014922_weather_data.parquet`) so the pipeline can be extended to multiple stations without filename collisions.
 
@@ -138,12 +139,25 @@ SELECT
     FLOOR(d.year / 10) * 10 AS decade,
     COUNT(*) AS extreme_cold_days
 FROM fact_weather_observations f
-JOIN dim_date d ON f.date = d.date
+JOIN dim_date d ON f.date_id = d.date_id
 WHERE f.datatype = 'TMIN'
   AND f.is_extreme = true
 GROUP BY 1
 ORDER BY 1;
 ```
+
+---
+
+## Power BI Dashboard
+
+The dashboard (`visuals/data_analysis.pbix`) connects directly to the Parquet outputs and provides four visualizations for exploring 87+ years of Minneapolis weather history.
+
+| Visual | Type | Description |
+|--------|------|-------------|
+| Extreme Event Count by Decade | Bar chart | Total extreme weather events grouped by decade — shows long-term trends in frequency |
+| Extreme Event Count by Season | Pie chart | Breakdown of extreme events by season (Winter / Spring / Summer / Fall) |
+| Extreme Event Count by Datatype | Pie chart | Breakdown of extreme events by measurement type (TMAX, TMIN, PRCP, SNOW, etc.) |
+| Average TMAX and TMIN by Year | Line chart | Annual average maximum and minimum temperatures — visualizes the long-term temperature record |
 
 ---
 
@@ -169,7 +183,7 @@ Date dimension for joining and calendar-based analysis.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| date_id | int | Primary key |
+| date_id | int | Primary key — derived as YYYYMMDD integer for stability across incremental runs |
 | date | datetime | Calendar date |
 | year / month / day | int | Calendar components |
 | season | str | Winter / Spring / Summer / Fall |
@@ -223,6 +237,7 @@ Subset of `weather_data` — only records that breach a threshold. Enriched with
 ## Extreme Weather Thresholds
 
 Thresholds are aligned to NWS Twin Cities watch/warning/advisory criteria for station USW00014922 (Minneapolis St. Paul International Airport).
+
 Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_criteria)
 
 | Datatype | Description | Threshold |
@@ -248,6 +263,7 @@ Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_crite
 | PyYAML | Configuration loading |
 | requests | NOAA API HTTP client |
 | pytest | Unit and integration testing (142 tests) |
+| Power BI | Dashboard and visualization layer |
 | AWS SDK for pandas layer | Provides pandas + pyarrow + numpy in Lambda |
 
 ---
@@ -297,7 +313,8 @@ cd .. && python -m pytest tests/
 | Backfill + incremental loading | Complete | 10-year chunks → daily incremental |
 | Athena queryability | Complete | External tables over S3 Parquet |
 | EventBridge scheduling | Complete | Daily automated runs |
-| Dashboard / visualization | Planned | — |
+| Stable surrogate keys | Complete | YYYYMMDD date_id — safe across incremental runs |
+| Dashboard / visualization | Complete | Power BI dashboard with 4 visuals (bar, 2× pie, line) |
 | Multi-station support | Planned | — |
 
 ---
@@ -313,6 +330,8 @@ This project was built with Claude (Anthropic) as a pair programming tool throug
 - Lambda packaging — diagnosing the pyarrow `.so` stripping issue and switching to the managed AWS SDK for pandas layer
 - Implementing the `upload_parquet_append_to_s3` append + deduplicate pattern
 - Drafting the backfill chunking logic in `lambda_handler`
+- Implementing the `date_id` fix in `models.py` — replacing `range(len(df))` with the YYYYMMDD integer derivation once I identified the collision root cause
+- Adding `sync_source_files()` to `build_lambda.py` and scaffolding `update_lambda.py` for the S3 upload + Lambda deploy workflow
 
 **What I decided independently:**
 - The overall pipeline architecture and stage boundaries
@@ -321,6 +340,8 @@ This project was built with Claude (Anthropic) as a pair programming tool throug
 - Which datatypes to pull and what constitutes a useful feature for downstream analysis
 - The backfill + incremental design pattern and the 10-year chunk size
 - Station selection (USW00014922) and confirming the 1938 data start date empirically via API
+- Diagnosing the `date_id` collision bug — recognizing that sequential row indexing breaks under incremental loads and that a date-derived key was the correct fix
+- The decision to use Power BI for the dashboard and all four visualization choices: which chart types to use, which dimensions to slice by (decade, season, datatype), and which metrics to trend over time (TMAX/TMIN by year)
 
 The test suite (142 tests across unit, integration, and data quality layers) was written collaboratively — I defined what needed to be tested and why; AI helped translate that into pytest code.
 

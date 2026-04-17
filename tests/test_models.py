@@ -221,7 +221,7 @@ def test_fact_contains_required_columns(dim_date, dim_location):
     """The star schema fact table must expose these exact columns for BI tools to query."""
     df = build_fact_weather_observations(PARSED_DATA, dim_date, dim_location, SETTINGS)
     assert set(df.columns) == {
-        "observation_id", "date_id", "location_id", "datatype", "value", "is_extreme"
+        "observation_id", "date_id", "date", "location_id", "datatype", "value", "is_extreme"
     }
 
 
