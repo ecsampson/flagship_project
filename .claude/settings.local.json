@@ -22,7 +22,15 @@
       "Bash(source /c/GitHub/flagship_project/venv/Scripts/activate)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(du -sh C:/GitHub/flagship_project/lambda_package/*)",
+      "Bash(rm:*)",
+      "Bash(du -sh /c/GitHub/flagship_project/lambda_package/pyarrow/*/__pycache__)",
+      "Bash(xargs du:*)",
+      "Bash(aws lambda:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:aws-sdk-pandas.readthedocs.io)",
+      "Bash(git push:*)"
     ]
   }
 }
