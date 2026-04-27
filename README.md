@@ -152,6 +152,8 @@ ORDER BY 1;
 
 The dashboard (`visuals/data_analysis.pbix`) connects directly to the Parquet outputs and provides four visualizations for exploring 87+ years of Minneapolis weather history.
 
+![Dashboard Overview](assets/dashboard.png)
+
 | Visual | Type | Description |
 |--------|------|-------------|
 | Extreme Event Count by Decade | Bar chart | Total extreme weather events grouped by decade — shows long-term trends in frequency |
