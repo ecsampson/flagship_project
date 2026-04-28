@@ -264,7 +264,7 @@ Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_crite
 | boto3 | AWS SDK — S3, Lambda, and metadata operations |
 | PyYAML | Configuration loading |
 | requests | NOAA API HTTP client |
-| pytest | Unit and integration testing (142 tests) |
+| pytest | Unit and integration testing (167 tests) |
 | Power BI | Dashboard and visualization layer |
 | AWS SDK for pandas layer | Provides pandas + pyarrow + numpy in Lambda |
 
@@ -345,6 +345,6 @@ This project was built with Claude (Anthropic) as a pair programming tool throug
 - Diagnosing the `date_id` collision bug — recognizing that sequential row indexing breaks under incremental loads and that a date-derived key was the correct fix
 - The decision to use Power BI for the dashboard and all four visualization choices: which chart types to use, which dimensions to slice by (decade, season, datatype), and which metrics to trend over time (TMAX/TMIN by year)
 
-The test suite (142 tests across unit, integration, and data quality layers) was written collaboratively — I defined what needed to be tested and why; AI helped translate that into pytest code.
+The test suite (167 tests across unit, integration, and data quality layers) was written collaboratively — I defined what needed to be tested and why; AI helped translate that into pytest code.
 
 The intent is to demonstrate that AI tools raise the ceiling on what one engineer can ship, while engineering judgment still determines what gets built and why.
