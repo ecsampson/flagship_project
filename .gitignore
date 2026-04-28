@@ -208,6 +208,7 @@ __marimo__/
 config/settings.yaml
 data/*.csv
 data/*.parquet
+.claude/
 
 # Lambda build artifacts
 lambda_package/
