@@ -33,7 +33,5 @@ models:
   weather_analytics:
     staging:
       +materialized: view
-      +schema: staging
     marts:
       +materialized: table
-      +schema: analytics
