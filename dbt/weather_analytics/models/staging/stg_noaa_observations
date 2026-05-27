@@ -1,0 +1,17 @@
+with source as (
+    select *
+    from {{ source('flagship_weather', 'fact_weather_observations') }}
+),
+
+renamed as (
+    select
+        observation_id,
+        date_id,
+        location_id,
+        datatype,
+        value,
+        is_extreme,
+    from source
+)
+
+select * from renamed

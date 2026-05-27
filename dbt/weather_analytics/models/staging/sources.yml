@@ -1,0 +1,11 @@
+sources:
+  - name: flagship_weather
+    database: awsdatacatalog
+    schema: flagship_weather_db
+    tables:
+      - name: fact_weather_observations
+        description: "Raw daily weather observations from NOAA station USW00014922"
+      - name: feat_weather_signals
+        description: "Feature engineeered signals including rolling averages and severity scores"
+      - name: dim_date
+        description: "Date dimension weith year, month, season attributes"
