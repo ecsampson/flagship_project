@@ -40,6 +40,11 @@ parse_noaa_data()           — normalize JSON, divide tenths-of-units values by
                                                         ▼
                                                AWS Athena + Glue
                                           (external tables over S3 Parquet)
+                                                        │
+                                                        ▼
+                                                dbt (weather_analytics)
+                                          staging/ — typed views over raw tables
+                                          marts/  — aggregated analytics tables
 ```
 
 **Key design decisions:**
@@ -265,6 +270,7 @@ Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_crite
 | PyYAML | Configuration loading |
 | requests | NOAA API HTTP client |
 | pytest | Unit and integration testing (167 tests) |
+| dbt (dbt-athena-community) | SQL transformation layer — staging views and mart tables over Athena |
 | Power BI | Dashboard and visualization layer |
 | AWS SDK for pandas layer | Provides pandas + pyarrow + numpy in Lambda |
 
@@ -300,6 +306,27 @@ cd src && python main.py
 cd .. && python -m pytest tests/
 ```
 
+### dbt (requires Python 3.12)
+
+```bash
+# 1. Set up the dbt environment
+cd dbt
+py -3.12 -m venv venv
+source venv/Scripts/activate  # Windows
+# source venv/bin/activate    # macOS/Linux
+pip install -r requirements.txt
+
+# 2. Configure the Athena profile
+# Edit ~/.dbt/profiles.yml — set s3_staging_dir, database, region, and AWS credentials
+
+# 3. Verify the connection
+cd weather_analytics
+dbt debug
+
+# 4. Run the models
+dbt run
+```
+
 ---
 
 ## Project Timeline
@@ -317,6 +344,7 @@ cd .. && python -m pytest tests/
 | EventBridge scheduling | Complete | Daily automated runs |
 | Stable surrogate keys | Complete | YYYYMMDD date_id — safe across incremental runs |
 | Dashboard / visualization | Complete | Power BI dashboard with 4 visuals (bar, 2× pie, line) |
+| dbt integration | In Progress | Staging and mart models over Athena (weather_analytics project) |
 | Multi-station support | Planned | — |
 
 ---
