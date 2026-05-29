@@ -10,7 +10,7 @@ renamed as (
         location_id,
         datatype,
         value,
-        is_extreme,
+        is_extreme
     from source
 )
 
