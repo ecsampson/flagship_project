@@ -43,8 +43,15 @@ parse_noaa_data()           — normalize JSON, divide tenths-of-units values by
                                                         │
                                                         ▼
                                                 dbt (weather_analytics)
-                                          staging/ — typed views over raw tables
-                                          marts/  — aggregated analytics tables
+                                          staging/local_station/
+                                            stg_noaa_observations   (fact_weather_observations)
+                                            stg_date                (dim_date)
+                                            stg_weather_signals     (feat_weather_signals)
+                                                        │
+                                                        ▼
+                                          marts/
+                                            mart_extreme_weather    (stg_noaa_observations ⋈ stg_date)
+                                            mart_weather_signals    (stg_weather_signals ⋈ stg_date)
 ```
 
 **Key design decisions:**
@@ -329,6 +336,29 @@ dbt run
 
 ---
 
+## dbt Models
+
+The `weather_analytics` dbt project transforms Athena tables into two analytics-ready mart tables. All staging models live under `models/staging/local_station/`.
+
+![dbt Lineage](assets/lineage_local_station.png)
+
+**Staging layer** — typed views over raw Athena tables:
+
+| Model | Source table | Description |
+|-------|-------------|-------------|
+| `stg_noaa_observations` | `flagship_weather.fact_weather_observations` | Typed view of all (date, datatype) observations; preserves `is_extreme` flag |
+| `stg_date` | `flagship_weather.dim_date` | Typed view of the date dimension — year, month, day, season, is_weekend |
+| `stg_weather_signals` | `flagship_weather.feat_weather_signals` | Typed view of feature-engineered rolling stats, severity scores, and streaks |
+
+**Mart layer** — analytics tables joining observations with calendar context:
+
+| Model | Inputs | Description |
+|-------|--------|-------------|
+| `mart_extreme_weather` | `stg_noaa_observations` + `stg_date` | All extreme events (`is_extreme = true`) enriched with full calendar attributes — used for decade/season breakdowns |
+| `mart_weather_signals` | `stg_weather_signals` + `stg_date` | Feature-engineered records enriched with calendar attributes — rolling averages, deviation, severity score, and consecutive-day streaks |
+
+---
+
 ## Project Timeline
 
 | Phase | Status | Description |
@@ -344,7 +374,7 @@ dbt run
 | EventBridge scheduling | Complete | Daily automated runs |
 | Stable surrogate keys | Complete | YYYYMMDD date_id — safe across incremental runs |
 | Dashboard / visualization | Complete | Power BI dashboard with 4 visuals (bar, 2× pie, line) |
-| dbt integration | In Progress | Staging and mart models over Athena (weather_analytics project) |
+| dbt integration | Complete | 3 staging models + 2 mart models over Athena (mart_extreme_weather, mart_weather_signals) |
 | Multi-station support | Planned | — |
 
 ---
