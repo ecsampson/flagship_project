@@ -18,6 +18,7 @@ renamed as (
         is_weekend
 
     from source
+    where date is not null
 
 )
 

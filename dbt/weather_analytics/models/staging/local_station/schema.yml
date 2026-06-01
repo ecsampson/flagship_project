@@ -1,0 +1,67 @@
+version: 2
+
+models:
+ - name: stg_noaa_observations
+   columns:
+     - name: observation_id
+       tests:
+         - unique:
+             config:
+                severity: warn
+         - not_null
+     - name: date_id
+       tests:
+         - not_null
+     - name: datatype
+       tests:
+         - not_null
+     - name: value
+       tests:
+         - not_null
+ - name: stg_date
+   columns:
+     - name: date_id
+       tests:
+         - unique
+         - not_null
+     - name: date
+       tests:
+         - not_null
+     - name: year
+       tests:
+         - not_null
+     - name: month
+       tests:
+         - not_null
+     - name: day
+       tests:
+         - not_null
+     - name: season
+       tests:
+         - not_null
+     - name: is_weekend
+       tests:
+         - not_null
+ - name: stg_weather_signals
+   columns:
+     - name: date
+       tests:
+         - not_null
+     - name: datatype
+       tests:
+         - not_null
+     - name: value
+       tests:
+         - not_null
+     - name: deviation
+       tests:
+         - not_null
+     - name: is_extreme
+       tests:
+         - not_null
+     - name: severity_score
+       tests:
+         - not_null
+     - name: consecutive_days
+       tests:
+         - not_null
