@@ -26,6 +26,7 @@ def build_dim_date(parsed_data):
     ).sort_values()
 
     df = pd.DataFrame({"date": dates})
+    df = df.dropna(subset=["date"])
     df["date_id"] = pd.to_datetime(df["date"]).dt.strftime("%Y%m%d").astype(int)
     df["year"] = df["date"].dt.year
     df["month"] = df["date"].dt.month
@@ -87,7 +88,7 @@ def build_fact_weather_observations(parsed_data, dim_date, dim_location, setting
         lambda row: _is_extreme(row["datatype"], row["value"], thresholds), axis=1
     )
 
-    df["observation_id"] = range(len(df))
+    df["observation_id"] = df["date"].astype(str) + "_" + df["datatype"]
 
     return df[["observation_id", "date_id", "date", "location_id", "datatype", "value", "is_extreme"]]
 
