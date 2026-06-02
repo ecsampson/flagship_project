@@ -2,66 +2,87 @@ version: 2
 
 models:
  - name: stg_noaa_observations
+   description: "Daily weather observations from NOAA station USW00014922 (Minneapolis St. Paul International Airport), including both standard and extreme events from 1938 to present."
    columns:
      - name: observation_id
+       description: "This is the primary key and a unique identifier for each observation, it is derived using date and datatype." 
        tests:
          - unique:
              config:
                 severity: warn
          - not_null
      - name: date_id
+       description: "Foreign key referencing the date dimension, in YYYYMMDD integer format."
        tests:
          - not_null
      - name: datatype
+       description: "This is the type of weather event that occurred."
        tests:
          - not_null
      - name: value
+       description: "This is how much precipitation, temperature etc... for the given weather event."
        tests:
          - not_null
  - name: stg_date
+   description: "This describes the date on which the events were recorded. It is used to better understand the severity of weather events."
    columns:
      - name: date_id
+       description: "The primary key of this model."
        tests:
          - unique
          - not_null
      - name: date
+       description: "The calendar date of the observation in YYYY-MM-DD format."
        tests:
          - not_null
      - name: year
+       description: "This is the year that it took place."
        tests:
          - not_null
      - name: month
+       description: "The month on which it took place."
        tests:
          - not_null
      - name: day
+       description: "The day on which it took place."
        tests:
          - not_null
      - name: season
+       description: "The season in which the event happened, better used to understand if it is a extreme event."
        tests:
          - not_null
      - name: is_weekend
+       description: "Boolean flag indicating whether the date falls on a Saturday or Sunday."
        tests:
          - not_null
  - name: stg_weather_signals
+   description: "Used to help detect if a certain weather event or events are extreme."
    columns:
      - name: date
+       description: "The date on which it occurred."
        tests:
          - not_null
      - name: datatype
+       description: "The type of weather event that occurred."
        tests:
          - not_null
      - name: value
+       description: "The numerical value of the weather event, for example the number of inches it snowed on a given day."
        tests:
          - not_null
      - name: deviation
+       description: "The amount of which the value deviates from the normal occurrance."
        tests:
          - not_null
      - name: is_extreme
+       description: "Defining if a weather event is extreme or not."
        tests:
          - not_null
      - name: severity_score
+       description: "How severe the weather event is."
        tests:
          - not_null
      - name: consecutive_days
+       description: "How many days the severe weather event has occurred for."
        tests:
          - not_null
