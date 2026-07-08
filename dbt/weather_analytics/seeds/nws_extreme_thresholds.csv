@@ -1,0 +1,8 @@
+datatype,threshold,unit
+TMAX,95,F
+TMIN,-20,F
+PRCP,1.0,inches
+SNOW,4.0,inches
+SNWD,6.0,inches
+AWND,25.0,mph
+WSF2,35.0,mph

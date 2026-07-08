@@ -35,3 +35,10 @@ models:
       +materialized: view
     marts:
       +materialized: table
+
+
+seeds:
+  weather_analytics:
+    nws_extreme_thresholds:
+      +column_types:
+        threshold: double
