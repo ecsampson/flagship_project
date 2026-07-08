@@ -58,6 +58,7 @@ parse_noaa_data()           — normalize JSON, divide tenths-of-units values by
 - NOAA returns values in tenths of units (e.g. 320 = 32.0°C) — conversion happens once, at parse time, to avoid the risk of double-applying it downstream.
 - Parquet files in S3 use an **append + deduplicate** pattern: each run reads the existing S3 object, concatenates new rows, drops duplicates on the natural key (`date + datatype`), and writes back. This means reruns and Lambda retries are safe — no duplicate rows accumulate.
 - `date_id` in `dim_date` is derived as an integer in `YYYYMMDD` format (e.g. `20240315`) rather than a sequential row index. This makes the surrogate key stable across incremental runs — the same date always maps to the same `date_id`, so foreign keys in the fact table remain valid after any backfill or retry.
+- `observation_id` in `fact_weather_observations` follows the same principle — it's a `{date}_{datatype}` composite key rather than a sequential index, so it stays unique and stable across reruns. `build_dim_date` also drops `NaT` rows before deriving `date_id`, eliminating a ghost row that was propagating into downstream joins.
 - CSV files are written locally to `/tmp` each run for debugging and are also uploaded to S3, but they are not the source of truth for analytics — Parquet is.
 - Output files are prefixed with the station ID (`USW00014922_weather_data.parquet`) so the pipeline can be extended to multiple stations without filename collisions.
 
@@ -184,7 +185,7 @@ The central fact table. One row per (date, datatype) observation.
 
 | Column | Type | Description |
 |--------|------|--------------|
-| observation_id | int | Surrogate key |
+| observation_id | str | Composite key: `{date}_{datatype}` — stable and unique across incremental backfill runs (replaces a sequential index, which collided on reruns) |
 | date_id | int | Foreign key → dim_date |
 | date | datetime | Observation date (also stored here for dedup and direct querying) |
 | location_id | int | Foreign key → dim_location |
@@ -357,6 +358,10 @@ The `weather_analytics` dbt project transforms Athena tables into two analytics-
 | `mart_extreme_weather` | `stg_noaa_observations` + `stg_date` | All extreme events (`is_extreme = true`) enriched with full calendar attributes — used for decade/season breakdowns |
 | `mart_weather_signals` | `stg_weather_signals` + `stg_date` | Feature-engineered records enriched with calendar attributes — rolling averages, deviation, severity score, and consecutive-day streaks |
 
+**Documentation and tests** — every staging model and column has a description in `schema.yml`, plus `not_null` tests on all key columns and a `unique` test on `observation_id` (run as `warn` severity while composite-key uniqueness is still being hardened). Run `dbt docs generate && dbt docs serve` for the full interactive lineage graph.
+
+**Seeds** — `seeds/nws_extreme_thresholds.csv` checks NWS extreme-weather threshold values into version control as static reference data, independent of the Python pipeline's `config/settings.yaml` thresholds. It appears in the lineage graph as an unconnected seed node — it isn't referenced by any model yet. Reconciling the two threshold sources and wiring `mart_extreme_weather` to join against the seed instead of relying solely on the upstream `is_extreme` flag is a natural next step.
+
 ---
 
 ## Project Timeline
@@ -375,6 +380,8 @@ The `weather_analytics` dbt project transforms Athena tables into two analytics-
 | Stable surrogate keys | Complete | YYYYMMDD date_id — safe across incremental runs |
 | Dashboard / visualization | Complete | Power BI dashboard with 4 visuals (bar, 2× pie, line) |
 | dbt integration | Complete | 3 staging models + 2 mart models over Athena (mart_extreme_weather, mart_weather_signals) |
+| dbt documentation & tests | Complete | Column descriptions + not_null/unique tests on all staging models |
+| dbt seed for thresholds | In progress | `nws_extreme_thresholds.csv` version-controlled but not yet wired into any model |
 | Multi-station support | Planned | — |
 
 ---
@@ -391,6 +398,7 @@ This project was built with Claude (Anthropic) as a pair programming tool throug
 - Implementing the `upload_parquet_append_to_s3` append + deduplicate pattern
 - Drafting the backfill chunking logic in `lambda_handler`
 - Implementing the `date_id` fix in `models.py` — replacing `range(len(df))` with the YYYYMMDD integer derivation once I identified the collision root cause
+- Implementing the `observation_id` fix in `models.py` — replacing `range(len(df))` with a `{date}_{datatype}` composite key, and dropping `NaT` rows in `build_dim_date` to remove a ghost row that was propagating into downstream joins
 - Adding `sync_source_files()` to `build_lambda.py` and scaffolding `update_lambda.py` for the S3 upload + Lambda deploy workflow
 
 **What I decided independently:**
@@ -401,6 +409,7 @@ This project was built with Claude (Anthropic) as a pair programming tool throug
 - The backfill + incremental design pattern and the 10-year chunk size
 - Station selection (USW00014922) and confirming the 1938 data start date empirically via API
 - Diagnosing the `date_id` collision bug — recognizing that sequential row indexing breaks under incremental loads and that a date-derived key was the correct fix
+- Diagnosing the `observation_id` collision and `dim_date` ghost-row bugs — recognizing that sequential indexing and stray `NaT` dates were corrupting downstream joins during incremental backfills
 - The decision to use Power BI for the dashboard and all four visualization choices: which chart types to use, which dimensions to slice by (decade, season, datatype), and which metrics to trend over time (TMAX/TMIN by year)
 
 The test suite (167 tests across unit, integration, and data quality layers) was written collaboratively — I defined what needed to be tested and why; AI helped translate that into pytest code.
