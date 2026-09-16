@@ -1,5 +1,7 @@
 boto3
 pyarrow
+awswrangler
+scikit-learn
 certifi==2026.2.25
 charset-normalizer==3.4.6
 colorama==0.4.6

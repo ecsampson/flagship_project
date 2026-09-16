@@ -281,6 +281,8 @@ Source: [NWS Twin Cities — WWA Criteria](https://www.weather.gov/mpx/wwa_crite
 | dbt (dbt-athena-community) | SQL transformation layer — staging views and mart tables over Athena |
 | Power BI | Dashboard and visualization layer |
 | AWS SDK for pandas layer | Provides pandas + pyarrow + numpy in Lambda |
+| awswrangler | Queries Athena marts directly into pandas for the anomaly detection pipeline |
+| scikit-learn | Gradient boosting regressor for ML-based anomaly detection |
 
 ---
 
@@ -364,6 +366,21 @@ The `weather_analytics` dbt project transforms Athena tables into two analytics-
 
 ---
 
+## Anomaly Detection
+
+A separate, in-progress ML pipeline (`src/anomaly_data.py`, `anomaly_features.py`, `anomaly_model.py`) layers a regression-based anomaly detector on top of the dbt marts, complementing the threshold-based extreme weather detection above. Currently implemented for **TMAX only**, with the same pattern planned for the remaining datatypes (TMIN, PRCP, SNOW, SNWD, AWND, WSF2).
+
+**How it works:**
+
+1. `anomaly_data.get_tmax_data()` — pulls `(date, value AS tmax)` for `datatype = 'TMAX'` from `mart_weather_signals` via Athena (using `awswrangler`).
+2. `anomaly_features.build_feature_table()` — reindexes the data to a complete daily calendar (so gaps in the station record don't distort lag calculations), then derives `day_of_year`, `year`, and `tmax_lag1` (previous day's value).
+3. `anomaly_model.split_train_test()` — drops gap-days with no ground-truth value, then splits chronologically on a configurable cutoff year (train on the past, test on the future).
+4. `anomaly_model.fit_model()` — fits a `HistGradientBoostingRegressor` (scikit-learn) on seasonal, trend, and persistence features to predict expected TMAX; large residuals between predicted and observed values are the anomaly signal.
+
+Once extended to all datatypes, this will provide a statistical anomaly detector alongside the existing NWS-threshold-based `is_extreme` flag — catching unusual-for-the-season values that don't necessarily breach an absolute threshold.
+
+---
+
 ## Project Timeline
 
 | Phase | Status | Description |
@@ -382,6 +399,7 @@ The `weather_analytics` dbt project transforms Athena tables into two analytics-
 | dbt integration | Complete | 3 staging models + 2 mart models over Athena (mart_extreme_weather, mart_weather_signals) |
 | dbt documentation & tests | Complete | Column descriptions + not_null/unique tests on all staging models |
 | dbt seed for thresholds | In progress | `nws_extreme_thresholds.csv` version-controlled but not yet wired into any model |
+| ML-based anomaly detection | In progress | Regression model (TMAX only) predicting expected values from seasonal/trend/lag features; extension to TMIN, PRCP, SNOW, SNWD, AWND, WSF2 planned |
 | Multi-station support | Planned | — |
 
 ---
